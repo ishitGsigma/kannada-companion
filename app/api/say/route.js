@@ -109,12 +109,13 @@ export async function POST(req) {
   try {
     request = await req.json();
     const { text, context, tone, address } = request;
+    const q = String(text || '').trim();
+    if (!q) return NextResponse.json({ error: 'No text provided.' }, { status: 400 });
+    if (q.length > 1000) return NextResponse.json({ error: 'Keep the sentence under 1,000 characters.' }, { status: 400 });
+
     const key = process.env.GEMINI_API_KEY;
     const sarvamKey = process.env.SARVAM_API_KEY;
     if (!key && !sarvamKey) return NextResponse.json({ error: 'Configure a Gemini or Sarvam API key.' }, { status: 500 });
-
-    const q = String(text || '').trim();
-    if (!q) return NextResponse.json({ error: 'No text provided.' }, { status: 400 });
 
     const ck = `${context}|${tone}|${address || 'none'}|${q.toLowerCase()}`;
     if (cache.has(ck)) return NextResponse.json(cache.get(ck));

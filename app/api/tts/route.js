@@ -7,8 +7,12 @@ const speaker = process.env.SARVAM_SPEAKER || 'shubh';
 export async function POST(req) {
   try {
     const { text } = await req.json();
-    if (!text || !text.trim()) {
+    const input = String(text || '').trim();
+    if (!input) {
       return NextResponse.json({ error: 'No text provided' }, { status: 400 });
+    }
+    if (input.length > 1000) {
+      return NextResponse.json({ error: 'Keep the phrase under 1,000 characters' }, { status: 400 });
     }
 
     if (!key) {
@@ -22,7 +26,7 @@ export async function POST(req) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        text: text.trim(),
+        text: input,
         language_code: languageCode,
         speaker,
         output_audio_codec: 'wav'

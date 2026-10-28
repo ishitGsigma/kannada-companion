@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test": "node --test lib/storage.test.js lib/translationQuality.test.js lib/addressing.test.js lib/supabase/sync.test.js"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

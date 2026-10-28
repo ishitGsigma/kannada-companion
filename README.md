@@ -65,7 +65,7 @@ The need is visible in current news from Karnataka:
 - **Honest failure.** If the AI is unavailable, the app says so and shows the closest phrasebook entry. It never pretends that entry is a translation of your sentence.
 - **You choose, the app doesn't guess.** Address words (*anna*, *akka*, *sir*, *madam*) are selected by the user. Age and gender are never inferred.
 - **Private by default.** Guest mode works without an account. The emergency card never leaves the device.
-- **Cost-aware.** Rate limits, input caps and caching keep the free-tier AI credits from being drained.
+- **Cost-aware, not quota-proof.** Exact phrasebook matches avoid AI calls, and successful translations are cached in-process. Sequential fallback requests can still use provider quota while recovering from model errors.
 
 ---
 
@@ -98,7 +98,7 @@ The thread alternates between **You say** and **They say** turns, and each turn 
 Choose *Anna*, *Akka*, *Sir* or *Madam* yourself. The word is added in front of the Kannada and transliteration, and a short note explains the choice. For example, with *Anna* selected, the phrase becomes `ಅಣ್ಣ, ಇದರ ಬೆಲೆ ಎಷ್ಟು?`. The app notes that relationships and preferences vary.
 
 ### Natural Kannada audio
-Audio is generated with Sarvam AI text-to-speech. If that is unavailable, the app falls back to the browser's own speech voice (it prefers a Kannada voice, then Hindi, then the default). Repeated taps on the same phrase reuse cached audio instead of calling the server again.
+Audio is generated with Sarvam AI text-to-speech. If that is unavailable, the app falls back to the browser's own speech voice (it prefers a Kannada voice, then Hindi, then the default). Each Sarvam playback can use provider quota; the TTS route does not currently cache audio.
 
 ### My Kannada (reuse and learn)
 - Save any phrase with one tap, including AI-generated ones.
@@ -130,7 +130,7 @@ flowchart TD
   A["User types an English sentence"] --> B{"Exact match in the phrasebook<br/>and no address word chosen?"}
   B -- yes --> C["Show phrasebook card instantly<br/>(no network call)"]
   B -- no --> D["POST /api/say"]
-  D --> R{"Within rate limit<br/>and 300 characters?"}
+  D --> R{"Input is at most 1,000 characters?"}
   R -- no --> X["429 or 400 error shown to the user"]
   R -- yes --> E{"Already cached?"}
   E -- yes --> Z["Return cached result"]
@@ -253,6 +253,13 @@ One simple phonetic scheme throughout: long vowels doubled (`aa`, `ee`, `oo`), n
 
 ## Getting started
 
+Requirements: Node.js 18.17 or newer and npm.
+
+1. Install dependencies with `npm install`.
+2. Copy `.env.example` to `.env.local` and fill in the provider values you want to use. Never commit `.env.local`.
+3. Run `npm run dev` and open `http://localhost:3000` (or use the port printed by Next.js if 3000 is occupied).
+4. For Supabase sync, run [`supabase/schema.sql`](supabase/schema.sql), configure the Auth Site URL and `/auth/callback` redirect, then restart after changing env values.
+
 ### Getting keys
 
 - **Gemini:** create a key at Google AI Studio. A free tier exists, with rate limits that change, so check your project's current limits there.
@@ -269,7 +276,7 @@ One simple phonetic scheme throughout: long vowels doubled (`aa`, `ee`, `oo`), n
 
 ## API reference
 
-All routes accept and return JSON, except audio. Each is rate limited per visitor (by IP address).
+Routes accept and return JSON, except `/api/tts`, which returns audio. The app enforces input-length checks but does **not** currently have a distributed per-IP rate limiter; upstream Gemini and Sarvam quotas still apply. Add a shared rate limiter at the hosting layer before public production use.
 
 ### `POST /api/say`
 Translate an English sentence into spoken Kannada.
@@ -281,7 +288,7 @@ Translate an English sentence into spoken Kannada.
 
 | Field | Values |
 |---|---|
-| `text` | Required, up to 300 characters |
+| `text` | Required, up to 1,000 characters |
 | `context` | `auto driver`, `shopkeeper`, `doctor / pharmacist`, `colleague`, `boss / senior`, `stranger` |
 | `tone` | `polite` or `casual` |
 | `address` | `none`, `anna`, `akka`, `sir` or `madam` |
@@ -298,34 +305,28 @@ Translate an English sentence into spoken Kannada.
 ```
 Sarvam results add `"provider": "sarvam"`. Phrasebook fallbacks add `"fallback_used": true`. The route returns `200` with a phrasebook fallback even if translation fails, so the interface always has something to show.
 
-**Errors:** `400` empty or too-long text, `429` rate limited (with a `Retry-After` header), `500` no AI key configured.
+**Errors:** `400` empty or over 1,000 characters, `500` neither AI provider key is configured. Provider failures generally fall back to another provider or a phrasebook suggestion.
 
 ### `POST /api/conversation`
 Translate a Kannada reply that the user heard into English.
 
-**Request:** `{ "text": "ನೂರು ರೂಪಾಯಿ" }` (up to 300 characters)
+**Request:** `{ "text": "ನೂರು ರೂಪಾಯಿ" }` (up to 1,000 characters)
 **Response (200):** `{ "english": "100 rupees" }`
 **Errors:** `400` empty or too long, `429`, `502` empty or failed translation, `503` Sarvam not configured.
 
 ### `POST /api/tts`
 Generate Kannada speech.
 
-**Request:** `{ "text": "ಮೀಟರ್ ಹಾಕಿ" }` (up to 300 characters)
+**Request:** `{ "text": "ಮೀಟರ್ ಹಾಕಿ" }` (up to 1,000 characters)
 **Response (200):** `audio/wav`
-**Errors:** `400` empty or too long, `429`, `502` Sarvam failure, `503` Sarvam not configured. The browser then falls back to its own voice.
+**Errors:** `400` empty or over 1,000 characters, `500` Sarvam failure, `503` Sarvam not configured. The browser then falls back to its own voice.
 
 ### `GET /auth/callback`
 Completes the email sign-in by exchanging the `code` query parameter for a session, then redirects to `/account` (or to `/account?auth_error=...` on failure).
 
-### Limits
+### Request limits
 
-| Route | Requests per minute per visitor | Max input |
-|---|---|---|
-| `/api/say` | 15 | 300 characters |
-| `/api/conversation` | 15 | 300 characters |
-| `/api/tts` | 60 | 300 characters |
-
-The limiter keeps counts in memory on each server instance. On serverless hosting this slows abuse but is not a hard guarantee, so also add a rate-limit rule in your host's firewall.
+`/api/say`, `/api/conversation`, and `/api/tts` reject inputs over 1,000 characters. There is no app-level rate limiter yet. A serverless deployment needs a shared rate limiter or host-level protection; in-memory counters would not provide a reliable limit across instances.
 
 ---
 
@@ -364,16 +365,17 @@ Both tables reference `auth.users` with `on delete cascade`, so deleting a user 
 - The Supabase publishable key is designed to be public. Never use a Supabase service-role or secret key in this app.
 
 **Abuse and cost control**
-- Per-visitor rate limits and a 300-character input cap on every AI route.
-- Server-side caches for translations and audio, and a client-side audio cache, so repeated requests do not spend credits.
-- Upstream calls have timeouts, and model failover prevents one busy model from taking the feature down.
+- A 1,000-character input cap on translation, reply interpretation, and TTS routes.
+- Gemini translation results are cached in-process; this cache is not shared across serverless instances. TTS is not cached by the API route.
+- Gemini and Sarvam translation calls have timeouts and provider failover. Provider quotas still apply.
+- There is no distributed per-visitor rate limiter yet; add one before public production use to protect provider credits.
 
 **Data protection**
 - Row Level Security on every table: a user can only read and write rows where `user_id` equals their own id.
 - The emergency card and conversation text are never uploaded to Supabase.
 
 **Dependencies**
-- `npm audit` reported no known vulnerabilities after upgrading to Next.js 16 and React 19 (checked October 2026). Re-run `npm audit` before each release.
+- The current project uses Next.js 14 and React 18. `npm audit` has reported high/critical advisories in Next.js and PostCSS; the suggested automatic fix requires a major Next.js upgrade. Review and upgrade these dependencies before treating the deployment as production-ready. Re-run `npm audit` before each release.
 
 **What is sent to third parties.** Sentences typed into Say It, Kannada text for reply interpretation, and phrases played as audio are sent to Google (Gemini) and Sarvam AI to produce results. Free-tier terms for AI providers may allow them to use submitted content to improve their models. Do not type personal or sensitive information into Say It. The app does not collect photos or microphone audio.
 
@@ -396,7 +398,7 @@ Both tables reference `auth.users` with `on delete cascade`, so deleting a user 
 ## Testing
 
 ```bash
-node --test lib/*.test.js lib/supabase/*.test.js
+npm test
 ```
 
 13 automated tests cover:
