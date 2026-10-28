@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { isSaved, toggleSave, speak } from '../lib/storage';
 
 export default function PhraseCard({ phrase, label, onReplySelect, onSaveChange }) {
@@ -9,6 +10,15 @@ export default function PhraseCard({ phrase, label, onReplySelect, onSaveChange 
   const [feedback, setFeedback] = useState('');
 
   useEffect(() => { setSaved(isSaved(phrase.kn)); }, [phrase.kn]);
+
+  useEffect(() => {
+    if (!big) return undefined;
+    const closeOnEscape = event => {
+      if (event.key === 'Escape') setBig(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [big]);
 
   const badge = label || (phrase.verified ? 'Verified' : 'Needs review');
   const cls = ['AI-generated', 'Sarvam AI'].includes(badge) ? 'ai' : phrase.verified ? '' : 'un';
@@ -67,12 +77,14 @@ export default function PhraseCard({ phrase, label, onReplySelect, onSaveChange 
           ))}
         </div>
       )}
-      {big && (
-        <div className="overlay" onClick={() => setBig(false)}>
+      {big && typeof document !== 'undefined' && createPortal(
+        <div className="overlay" role="dialog" aria-modal="true" aria-label="Kannada phrase to show" onClick={() => setBig(false)}>
+          <button className="overlay-close" onClick={() => setBig(false)} aria-label="Close full-screen phrase">×</button>
           <div className="big">{phrase.kn}</div>
           {phrase.translit && <div className="tr2">{phrase.translit}</div>}
-          <p className="warn">Tap anywhere to close</p>
-        </div>
+          <p className="warn">Tap anywhere or press Escape to close</p>
+        </div>,
+        document.body,
       )}
     </article>
   );
