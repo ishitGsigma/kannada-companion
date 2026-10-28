@@ -9,7 +9,7 @@ Built for the **Kannada Digital Innovation Hackathon 2026** (HackerRank Campus C
 | | |
 |---|---|
 | Live demo | [kannada-companion on Vercel](https://kannada-companion-f61feqyyz-ishitgsigmas-projects.vercel.app/) |
-| Demo video | `<your video link>` |
+| Demo video | [Kannada Companion hackathon demo](https://youtu.be/Kpx8PnDZZCA) |
 | Source | [github.com/ishitGsigma/kannada-companion](https://github.com/ishitGsigma/kannada-companion) |
 
 <!-- Add screenshots to docs/screenshots/ and uncomment:
